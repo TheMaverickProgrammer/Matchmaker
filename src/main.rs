@@ -2,6 +2,9 @@ use rand::{distributions::Alphanumeric, Rng};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::rc::Rc;
+use std::net;
+use std::env;
+use std::time::Instant;
 
 #[derive(PartialEq)]
 struct Socket {
@@ -38,6 +41,31 @@ impl Server {
             .collect()
     }
 
+    fn poll(server: &Server) {
+        let ipaddr = "0.0.0.0".to_string() + ":" + &server.port.to_string();
+        let socket = net::UdpSocket::bind(ipaddr).expect("Failed to bind host socket");
+        let mut buf: Vec<u8> = Vec::with_capacity(100);
+        let mut last_packet_tm = Instant::now();
+
+        loop {
+            let mut read = true;
+
+            while read {
+                match socket.recv_from(&mut buf) {
+                    Ok((bytes, client_addr)) => {
+                        println!("client {} sent bytes {}", client_addr, bytes);
+
+                        // update our packet time
+                        last_packet_tm = Instant::now();
+                    },
+                    Err(e) => {
+                        println!("Error reading bytes: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
     //
     // non mut fn
     //
@@ -48,6 +76,10 @@ impl Server {
 
     fn has_socket(&self, socket: &Socket) -> bool {
         self.sessions.iter().position(|session: &Session| *session.socket == *socket) != None
+    }
+
+    fn valid_client_hash(&self, hash: &String) -> bool {
+        self.client_hashes.iter().position(|h: &String| *h == *hash) != None
     }
 
     //
@@ -79,6 +111,10 @@ impl Server {
 
         result
     }
+    
+    fn get_session(&mut self, key: &String) -> Option<&Session> {
+        self.sessions.iter().find(|session: &&Session| session.key == *key)
+    }
 
     fn drop_session(&mut self, socket: &Socket) {
         if let Some(pos) = self.sessions.iter().position(|session: &Session| *session.socket == *socket) {
@@ -90,12 +126,12 @@ impl Server {
 fn file_read_lines(path: &str) -> Vec<String> {
     let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
-    let result = Vec::new();
+    let mut result = Vec::new();
 
     // Read the file line by line using the lines() iterator from std::io::BufRead.
     for (index, line) in reader.lines().enumerate() {
         let line = line.unwrap(); // Ignore errors
-        println!("{}. {}", index + 1, line);
+        result.push(line);
     }
 
     result
@@ -108,15 +144,45 @@ fn print_key(key: &Option<String>) {
     }
 }
 
+fn test_hash(server: &Server, hash: &String) {
+    println!("Hash {} is supported by server: {}", hash, server.valid_client_hash(hash));
+}
+
 fn main() {
-    let client_hashes = file_read_lines("./hashes.txt");
+    let mut port: u16;
 
-    let mut server = Server::new(3000);
-    let dummy_socket = Rc::new(Socket{ip: "192.135.45.2".to_string(), port: 4444});
+    match env::args().nth(1) {
+        Some(arg) => {
+            match arg.parse::<u16>() {
+                Ok(x) => {
+                    port = x;
+                },
+                Err(_) => {
+                    println!("Aborting! Port number must be an integer sequence only!");
+                    return;
+                }
+            }
+        },
+        None => {
+            println!("Supply a port number!");
+            return;
+        }
+    }
+
+    let mut server = Server::new(port);
+
+    server.support_client_hashes(file_read_lines("./hashes.txt"));
+
+    // test_hash(&server, &"ABCDEF".to_string()); // SHOULD SUCCEED
+    //test_hash(&server, &"YUIO".to_string()); // SHOULD FAIL
+
+    //let dummy_socket = Rc::new(Socket{ip: "192.135.45.2".to_string(), port: 4444});
     
-    let mut key = server.create_session(dummy_socket.clone(), false);
-    print_key(&key);
+    //let mut key = server.create_session(dummy_socket.clone(), false);
+    //print_key(&key);
 
-    key = server.create_session(dummy_socket.clone(), false);
-    print_key(&key);
+    //key = server.create_session(dummy_socket.clone(), false);
+    //print_key(&key);
+
+    Server::poll(&server);
 }
