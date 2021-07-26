@@ -2,20 +2,22 @@
 local socket = require("socket")
 
 local lib = {
-    ip = "",
-    port = 0,
-    timeout = 0,
-    socket = nil,
-    session_key = ""
+    ip = "",          -- matchmaker server ip
+    port = 0,         -- matchmaker server port
+    timeout = 0,      -- udp socket timeout (TODO: remove)
+    socket = nil,     -- udp socket
+    session_key = "", -- active session key
+    client_hash = ""  -- crypto hash of client to verify authenticity
 }
 
 function lib:check_config() 
-    return string.len(self.ip) > 0 and self.port >= 1025 and self.port <= 65535 
+    return string.len(self.ip) > 0 and self.port >= 1025 and self.port <= 65535 and string.len(self.client_hash) > 0 
 end
 
-function lib:init(ip, port, timeout) 
+function lib:init(client_hash, ip, port, timeout) 
     self.ip = ip
     self.port = port
+    self.client_hash = client_hash
 
     if timeout ~= nil then
         self.timeout = timeout
@@ -37,7 +39,7 @@ end
 function lib:create_session(password_protected)
     if self:check_config() then
         if string.len(self.session_key) == 0 then
-            command = "CREATE"
+            command = self.client_hash .. " CREATE"
 
             if password_protected then 
                 command = command .. " PASSWORD-ONLY"
@@ -59,7 +61,7 @@ end
 function lib:join_session(password)
     if self:check_config() then
         if string.len(self.session_key) == 0 then
-            command = "JOIN"
+            command = self.client_hash .. " JOIN "
 
             if password then 
                 command = command .. " " .. password
