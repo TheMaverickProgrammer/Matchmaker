@@ -44,7 +44,7 @@ impl Server {
     fn poll(server: &Server) {
         let ipaddr = "0.0.0.0".to_string() + ":" + &server.port.to_string();
         let socket = net::UdpSocket::bind(ipaddr).expect("Failed to bind host socket");
-        let mut buf: Vec<u8> = Vec::with_capacity(100);
+        let mut buf = [0u8; 100];
         let mut last_packet_tm = Instant::now();
 
         loop {
@@ -54,6 +54,7 @@ impl Server {
                 match socket.recv_from(&mut buf) {
                     Ok((bytes, client_addr)) => {
                         println!("client {} sent bytes {}", client_addr, bytes);
+                        println!("content was: {}", std::str::from_utf8(&mut buf[0..bytes]).unwrap());
 
                         // update our packet time
                         last_packet_tm = Instant::now();
