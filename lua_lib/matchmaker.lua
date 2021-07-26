@@ -49,7 +49,7 @@ function lib:create_session(password_protected)
 
             data = self.socket:receive()
             if data then
-                print("Received: ", data)
+                print("Received: ".. data)
                 self.session_key = data
             end
         else 
@@ -61,7 +61,7 @@ end
 function lib:join_session(password)
     if self:check_config() then
         if string.len(self.session_key) == 0 then
-            command = self.client_hash .. " JOIN "
+            command = self.client_hash .. " JOIN"
 
             if password then 
                 command = command .. " " .. password
@@ -71,7 +71,7 @@ function lib:join_session(password)
 
             data = self.socket:receive()
             if data then
-                print("Received: ", data)
+                print("Received: ".. data)
             end
         else 
             print("You are hosting a session, could not join a session!")
@@ -86,13 +86,13 @@ function lib:close_session()
             return
         end
 
-        command = "CLOSE"
+        command = self.client_hash .. " CLOSE"
 
         self.socket:send(command)
 
         data = self.socket:receive()
         if data then
-            print("Received: ", data)
+            print("Received: ".. data)
 
             -- clear session key
             self.session_key = ""
