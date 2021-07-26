@@ -1,4 +1,6 @@
 use rand::{distributions::Alphanumeric, Rng};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::rc::Rc;
 
 #[derive(PartialEq)]
@@ -15,12 +17,17 @@ struct Session {
 
 struct Server {
     port: u16,
-    sessions: Vec<Session>
+    sessions: Vec<Session>,
+    client_hashes: Vec<String>
 }
 
 impl Server {
+    //
+    // static fn
+    //
+
     fn new(port: u16) -> Server {
-        Server { port: port, sessions: Vec::new() }    
+        Server { port: port, sessions: Vec::new(), client_hashes: Vec::new() }
     }
 
     fn generate_key() -> String {
@@ -31,12 +38,24 @@ impl Server {
             .collect()
     }
 
+    //
+    // non mut fn
+    //
+
     fn has_key(&self, key: &String) -> bool {
         self.sessions.iter().position(|session: &Session| session.key == *key) != None
     }
 
     fn has_socket(&self, socket: &Socket) -> bool {
         self.sessions.iter().position(|session: &Session| *session.socket == *socket) != None
+    }
+
+    //
+    // mut fn
+    //
+
+    fn support_client_hashes(&mut self, hashes: Vec<String>) {
+        self.client_hashes = hashes;
     }
 
     fn create_session(&mut self, socket: Rc<Socket>, password_protected: bool) -> Option<String> {
@@ -61,11 +80,25 @@ impl Server {
         result
     }
 
-    fn drop_session(&mut self, session_key: &String) {
-        if let Some(pos) = self.sessions.iter().position(|session: &Session| session.key == *session_key) {
+    fn drop_session(&mut self, socket: &Socket) {
+        if let Some(pos) = self.sessions.iter().position(|session: &Session| *session.socket == *socket) {
             self.sessions.remove(pos);
         }
     }
+}
+
+fn file_read_lines(path: &str) -> Vec<String> {
+    let file = File::open(path).unwrap();
+    let reader = BufReader::new(file);
+    let result = Vec::new();
+
+    // Read the file line by line using the lines() iterator from std::io::BufRead.
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.unwrap(); // Ignore errors
+        println!("{}. {}", index + 1, line);
+    }
+
+    result
 }
 
 fn print_key(key: &Option<String>) {
@@ -76,6 +109,8 @@ fn print_key(key: &Option<String>) {
 }
 
 fn main() {
+    let client_hashes = file_read_lines("./hashes.txt");
+
     let mut server = Server::new(3000);
     let dummy_socket = Rc::new(Socket{ip: "192.135.45.2".to_string(), port: 4444});
     
