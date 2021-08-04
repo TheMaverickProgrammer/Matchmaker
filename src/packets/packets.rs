@@ -39,9 +39,11 @@ pub enum ClientPacket {
         id: u64
     },
     Create {
+        client_hash: &'a str,
         password_protected: true
     },
     Join {
+        client_hash: &'a str,
         session_key: String
     },
     Close {}
@@ -155,7 +157,6 @@ impl PacketReciever {
     }
 
     pub fn sort_packets(&mut self,
-        &mut self,
         socket: &UdpSocket,
         id: u64,
         packet: ClientPacket
@@ -276,9 +277,11 @@ fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
             id: read_u64(buf)?
         }),
         PacketId::Create => Some(ClientPacket::Create {
+            client_hash: read_string_u8(buf)?,
             password_protected: read_bool(buf)?
         }),
         PacketId::Join => Some(ClientPacket::Join{
+            client_hash: read_string_u8(buf)?,
             session_key: read_string_u8(buf)?
         }),
         PacketId::Close => Some(ClientPacket::Close),

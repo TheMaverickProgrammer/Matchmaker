@@ -1,5 +1,3 @@
-// TODO: I forgot to always send the valid client hash with the packets
-
 use rand::{distributions::Alphanumeric, Rng};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -27,7 +25,7 @@ struct Client {
 struct Server {
     port: u16,
     clients: HashMap<SocketAddr, Client>,
-    sessions: HashMap<String, Client>,
+    sessions: HashMap<String, SocketAddr>,
     valid_client_hashes: Vec<String>
 }
 
@@ -52,10 +50,6 @@ impl Server {
             .take(7)
             .map(char::from)
             .collect()
-    }
-
-    fn is_password_command(token: &str) -> bool {
-        token == "PASSWORD-ONLY"
     }
 
     pub fn poll(server: &mut Server) {
@@ -108,21 +102,56 @@ impl Server {
     fn handle_packet(&mut self, socket: &UdpSocket, socket_address: SocketAddr, packet: ClientPacket) {
         match packet {
             ClientPacket::Ping => {
-                // TODO: send pong and update heartbeat for this client
+                self.clients.get(socket_address).unwrap().shipper.send(socket, ServerPacket::Pong{});
             },
             ClientPacket::Ack { id } => {
-                // TODO: handle internal acks...
+                self.clients.get(socket_address).unwrap().reciever.acknowledge(id);
             },
-            ClientPacket::Create { password_protected } => {
+            ClientPacket::Create { hash, password_protected } => {
+                if !self.valid_client_hash(hash) 
+                    return;
+
+                let mut reply: ServerPacket;
+
                 if let Some(key) = self.create_session(socket_addr, password_protected) {
-                    // TODO: send key
+                    reply = ServerPacket::Create{ session_key: key };
                 } else {
-                    // TODO: send error packet
+                    reply = ServerPacket::Error{ id: packet.id, message: &"Session failed to create" };
                 }
+
+                self.clients.get(socket_address).unwrap().shipper.send(socket, reply);
             },
-            ClientPacket::Join { session_key } => {
-                // TODO: find session and then swap socket addresses
-                //       then drop session from availability
+            ClientPacket::Join { hash, session_key } => {
+                let mut reply: ServerPacket;
+
+                if !self.valid_client_hash(hash) 
+                    return;
+
+                if session_key.is_empty() {
+                    if let Some(&client_addr) = self.get_client_from_open_session(socket_addr) {
+                        reply = ServerPacket::Join{ client_addr: &client_addr.to_string() };
+                    } else {
+                        reply = ServerPacket::Error{ id: packet.id, message: &"No open session found" };
+                    }
+                } else {
+                    if let Some(&client_addr) = self.get_client_from_session(socket_addr, session_key) {
+                        reply = ServerPacket::Join{ client_addr: &client_addr.to_string() };
+                    } else {
+                        reply = ServerPacket::Error{ id: packet.id, message: &"No session found with key" };
+                    }
+                }
+
+                // If we have a successful join packet, then
+                // ensure we send the join to the awaiting session client as well
+                match reply {
+                    ServerPacket::Join { addr_str } => {
+                        let client_session_addr = SocketAddr::from(addr_str);
+                        self.clients.get(client_session_addr).unwrap().shipper.send(socket, ServerPacket::Join{ client_addr: socket_address.to_string() });
+                        self.drop_client_session(client_session_addr);
+                    }
+                }
+
+                self.clients.get(socket_address).unwrap().shipper.send(socket, reply);
             },
             ClientPacket::Close => {
                 self.drop_client_session(socket_addr);
@@ -169,7 +198,7 @@ impl Server {
                     };
 
                     self.clients.insert(socket_address, client);
-                    self.sessions.insert(new_key, client);
+                    self.sessions.insert(new_key, socket_address);
 
                     println!("Session created for client {}:{} with key {} (password_protected: {})", socket_address.addr.ip(), socket_address.addr.port(), new_key, password_protected);
                     result = Some(new_key);
@@ -183,17 +212,19 @@ impl Server {
         result
     }
     
-    fn get_client_from_session(&mut self, key: &str) -> Option<&Client> {
+    fn get_client_from_session(&mut self, key: &str) -> Option<&SocketAddr> {
         self.sessions.get(key)
     }
 
-    fn get_client_from_open_session(&mut self) -> Option<&Client> {
+    fn get_client_from_open_session(&mut self) -> Option<&SocketAddr> {
         self.sessions
             .into_values()
-            .find(|client: &&Client| client.session.unwrap().password_protected == false)
+            .find(|socket_addr: &&SocketAddr| 
+                self.clients.get(socket_addr).unwrap().session.unwrap().password_protected == false 
+            )
     }
 
-    fn drop_client_session(&mut self, socket_address: &std::net::SocketAddr) -> bool {
+    fn drop_client_session(&mut self, socket_address: &SocketAddr) -> bool {
         if let Some(&client) = self.clients.remove(socket_address) {
             if let Some(session) = client.session {
                 self.sessions.remove(session);
