@@ -110,4 +110,8 @@ function lib:close()
     end
 end
 
+function lib:get_session() 
+    return self.session_key
+end
+
 return lib
