@@ -1,21 +1,20 @@
-use std::net;
-use super::bytes::*;
+use std::net::{UdpSocket, SocketAddr};
 use crate::threads::clock_thread::TICK_RATE;
+use num_derive;
 
 // enums
-#[repr(u16)]
+#[derive(num_derive::FromPrimitive)]
 enum PacketId {
-    PingPong,
-    Ack,
-    Create,
-    Join,
-    Close,
-    Error
+    PingPong = 0,
+    Ack = 1,
+    Create = 2,
+    Join = 3 ,
+    Close = 4,
+    Error = 5
 }
 
-#[derive(Debug)]
 pub enum ServerPacket<'a> {
-    Pong {},
+    Pong,
     Ack {
         id: u64
     },
@@ -23,9 +22,9 @@ pub enum ServerPacket<'a> {
         session_key: &'a str
     },
     Join {
-        client_addr: &'a str
+        client_addr: &'a SocketAddr
     },
-    Close {},
+    Close,
     Error {
         id: u64,
         message: &'a str
@@ -34,19 +33,19 @@ pub enum ServerPacket<'a> {
 
 #[derive(Debug)]
 pub enum ClientPacket {
-    Ping {},
+    Ping,
     Ack {
         id: u64
     },
     Create {
-        client_hash: &'a str,
-        password_protected: true
+        client_hash: String,
+        password_protected: bool
     },
     Join {
-        client_hash: &'a str,
+        client_hash: String,
         session_key: String
     },
-    Close {}
+    Close
 }
 
 // packets
@@ -60,15 +59,15 @@ pub struct Packet {
 // Clients have PacketShippers
 
 pub struct PacketShipper {
-    socket_address: std::net::SocketAddr,
+    socket_address: SocketAddr,
     next_id: u64,
     backed_up: Vec<Packet>
 }
 
 impl PacketShipper {
-    pub fn new(socket_address: std::new::SocketAddr) -> PacketShipper {
+    pub fn new(socket_address: SocketAddr) -> PacketShipper {
         PacketShipper {
-            socket_addr,
+            socket_address,
             next_id: 0,
             backed_up: Vec::new()
         }
@@ -78,7 +77,9 @@ impl PacketShipper {
         let mut data = vec![];
 
         write_u64(&mut data, self.next_id);
-        data.extend(build_packet(packet));
+        data.extend(build_server_packet(packet));
+
+        let _ = socket.send_to(&data, self.socket_address);
 
         self.backed_up.push(Packet {
             id: self.next_id,
@@ -86,13 +87,11 @@ impl PacketShipper {
             data
         });
 
-        let _ = socket.send_to(&data, self.socket_address);
-
         self.next_id += 1;
     }
 
     fn send_ack(&self, socket: &UdpSocket, id: u64) {
-        let buf = build_packet(&ServerPacket::Ack {
+        let buf = build_server_packet(&ServerPacket::Ack {
             id
         });
 
@@ -101,8 +100,6 @@ impl PacketShipper {
 
     pub fn resend_unacknowledged_packets(&self, socket: &UdpSocket) {
         let retry_delay = std::time::Duration::from_secs_f64(1.0 / TICK_RATE);
-
-        use itertools::Itertools;
 
         let iter = self
             .backed_up
@@ -152,7 +149,7 @@ impl PacketReciever {
         }
     }
 
-    pub fn get_last_message_time(&self) -> &std::time::Instance {
+    pub fn get_last_message_time(&self) -> &std::time::Instant {
         &self.last_message_time
     }
 
@@ -175,7 +172,7 @@ impl PacketReciever {
     }
 
     fn send_ack(&self, socket: &UdpSocket, id: u64) {
-        let buf = build_packet(&ServerPacket::Ack {
+        let buf = build_server_packet(&ServerPacket::Ack {
             id
         });
 
@@ -216,6 +213,7 @@ pub fn read_u16(buf: &mut &[u8]) -> Option<u16> {
     Some(data)
 }
 
+#[allow(dead_code)]
 pub fn read_u32(buf: &mut &[u8]) -> Option<u32> {
     use byteorder::{ByteOrder, LittleEndian};
 
@@ -248,11 +246,11 @@ pub fn read_u64(buf: &mut &[u8]) -> Option<u64> {
 
 pub fn read_string_u8(buf: &mut &[u8]) -> Option<String> {
     let len = read_byte(buf)? as usize;
-    read_string(bug, len);
+    read_string(buf, len)
 }
 
 fn read_string(buf: &mut &[u8], len: usize) -> Option<String> {
-    if bun.len() < len {
+    if buf.len() < len {
         *buf = &buf[buf.len()..];
         return None;
     }
@@ -271,26 +269,29 @@ fn parse_headers(buf: &mut &[u8]) -> Option<u64> {
 }
 
 fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
-    match read_u16(buf)? {
-        PacketId::PingPong => Some(ClientPacket::Ping),
-        PacketId::Ack => Some(ClientPacket::Ack {
+    let packet_type = num::FromPrimitive::from_u16(read_u16(buf)?);
+
+    match packet_type {
+        Some(PacketId::PingPong) => Some(ClientPacket::Ping),
+        Some(PacketId::Ack) => Some(ClientPacket::Ack {
             id: read_u64(buf)?
         }),
-        PacketId::Create => Some(ClientPacket::Create {
+        Some(PacketId::Create) => Some(ClientPacket::Create {
             client_hash: read_string_u8(buf)?,
             password_protected: read_bool(buf)?
         }),
-        PacketId::Join => Some(ClientPacket::Join{
+        Some(PacketId::Join) => Some(ClientPacket::Join{
             client_hash: read_string_u8(buf)?,
             session_key: read_string_u8(buf)?
         }),
-        PacketId::Close => Some(ClientPacket::Close),
+        Some(PacketId::Close) => Some(ClientPacket::Close),
         _ => None
     }
 }
 
 // writers
 
+#[allow(dead_code)]
 pub fn write_bool(buf: &mut Vec<u8>, data: bool) {
     buf.push(if data { 1 } else { 0 });
 }
@@ -303,6 +304,7 @@ pub fn write_u16(buf: &mut Vec<u8>, data: u16) {
     buf.extend(&buf_16);
 }
 
+#[allow(dead_code)]
 pub fn write_u32(buf: &mut Vec<u8>, data: u32) {
     use byteorder::{ByteOrder, LittleEndian};
 
@@ -314,23 +316,23 @@ pub fn write_u32(buf: &mut Vec<u8>, data: u32) {
 pub fn write_u64(buf: &mut Vec<u8>, data: u64) {
     use byteorder::{ByteOrder, LittleEndian};
 
-    let mut buf_32 = [0u8; 8];
+    let mut buf_64 = [0u8; 8];
     LittleEndian::write_u64(&mut buf_64, data);
     buf.extend(&buf_64);
 }
 
 pub fn write_string_u8(buf: &mut Vec<u8>, data: &str) {
     let len = if data.len() < u8::MAX.into() {
-        data.len() as u16
+        data.len() as u8
     } else {
-        u16::MAX
-    }
+        u8::MAX
+    };
 
     buf.push(len);
     buf.extend(&data.as_bytes()[0..len.into()]);
 }
 
-pub(super) fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
+pub fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
     let mut vec = Vec::new();
     let buf = &mut vec;
 
@@ -348,7 +350,7 @@ pub(super) fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
         },
         ServerPacket::Join { client_addr } => {
             write_u16(buf, PacketId::Join as u16);
-            write_string_u8(buf, *client_addr);
+            write_string_u8(buf, &client_addr.to_string());
         },
         ServerPacket::Close => {
             write_u16(buf, PacketId::Close as u16);
@@ -363,6 +365,6 @@ pub(super) fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
     vec
 }
 
-pub fn parse_client_packet(mut buf: &[u8]) -> Option(id, ClientPacket) {
-    Some((parse_headers(&buf)?, parse_packet(&buf)?))
+pub fn parse_client_packet(mut buf: &[u8]) -> Option<(u64, ClientPacket)> {
+    Some((parse_headers(&mut buf)?, parse_packet(&mut buf)?))
 }
