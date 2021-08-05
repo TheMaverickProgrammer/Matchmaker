@@ -90,14 +90,7 @@ impl PacketShipper {
         self.next_id += 1;
     }
 
-    fn send_ack(&self, socket: &UdpSocket, id: u64) {
-        let buf = build_server_packet(&ServerPacket::Ack {
-            id
-        });
-
-        let _ = socket.send_to(&buf, self.socket_address);
-    }
-
+    #[allow(dead_code)]
     pub fn resend_unacknowledged_packets(&self, socket: &UdpSocket) {
         let retry_delay = std::time::Duration::from_secs_f64(1.0 / TICK_RATE);
 
@@ -132,6 +125,7 @@ struct RecievedPacket {
     pub packet: ClientPacket
 }
 
+#[allow(dead_code)]
 pub struct PacketReciever {
     socket_address: std::net::SocketAddr,
     next_id: u64,
