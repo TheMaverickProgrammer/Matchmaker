@@ -4,11 +4,68 @@ local socket = require("socket")
 local lib = {
     ip = "",          -- matchmaker server ip
     port = 0,         -- matchmaker server port
-    timeout = 0,      -- udp socket timeout (TODO: remove)
+    timeout = 0,      -- connection timeout
     socket = nil,     -- udp socket
     session_key = "", -- active session key
     client_hash = ""  -- crypto hash of client to verify authenticity
 }
+
+local PacketId {
+    PingPong = 0,
+    Ack = 1,
+    Create = 2,
+    Join = 3 ,
+    Close = 4,
+    Error = 5    
+}
+
+function send_packet(ctx, packetId, data)
+    local bytestream = nil
+
+    -- {}
+    if packetId == PacketId.PingPong then 
+    
+    end
+
+    -- { id: u64 }
+    if packetId == PacketId.Ack then
+
+    end
+
+    -- { client_hash: str, password_procted: bool }
+    if packetId == PacketId.Create then 
+
+    end
+
+    -- { client_hash: str, session_key: str }
+    if packetId == PacketId.Join then 
+
+    end
+
+    -- {}
+    if packetId == PacketId.Close then 
+    
+    end
+end
+
+function read_packet(Ctx, bytestream)
+    local packetId = 0 
+
+    -- {}
+    if packetId == PacketId.PingPong then 
+
+    end
+
+    -- { id: u64 }
+    if packetId == PacketId.Ack then
+
+    end
+
+    -- { id: u64, message: str }
+    if packetId == PacketId.Error then 
+
+    end
+end
 
 function lib:check_config() 
     return string.len(self.ip) > 0 and self.port >= 1025 and self.port <= 65535 and string.len(self.client_hash) > 0 
@@ -32,26 +89,18 @@ function lib:init(client_hash, ip, port, timeout)
 
         self.socket = socket.udp()
         self.socket:setpeername(self.ip, self.port)
-        self.socket:settimeout(self.timeout)
     end
 end
 
 function lib:create_session(password_protected)
     if self:check_config() then
         if string.len(self.session_key) == 0 then
-            command = self.client_hash .. " CREATE"
+            local data = {
+                client_hash = self.client_hash,
+                password_protected = password_protected
+            }
 
-            if password_protected then 
-                command = command .. " PASSWORD-ONLY"
-            end
-
-            self.socket:send(command)
-
-            data = self.socket:receive()
-            if data then
-                print("Received: ".. data)
-                self.session_key = data
-            end
+            send_packet(self, PacketId.Create, data)
         else 
             print("You have a session already @ "..self.session_key)
         end
@@ -61,18 +110,12 @@ end
 function lib:join_session(password)
     if self:check_config() then
         if string.len(self.session_key) == 0 then
-            command = self.client_hash .. " JOIN"
-
-            if password then 
-                command = command .. " " .. password
-            end
-
-            self.socket:send(command)
-
-            data = self.socket:receive()
-            if data then
-                print("Received: ".. data)
-            end
+            local data = {
+                client_hash = self.client_hash,
+                session_key = password
+            }
+            
+            send_packet(self, PacketId.Join, data)
         else 
             print("You are hosting a session, could not join a session!")
         end
@@ -86,17 +129,7 @@ function lib:close_session()
             return
         end
 
-        command = self.client_hash .. " CLOSE"
-
-        self.socket:send(command)
-
-        data = self.socket:receive()
-        if data then
-            print("Received: ".. data)
-
-            -- clear session key
-            self.session_key = ""
-        end
+        send_packet(self, PacketId.Close, {})
     end
 end
 
@@ -108,6 +141,12 @@ function lib:close()
     if self.socket then 
         self.socket:close()
     end
+end
+
+-- Processes and acks incoming packets 
+-- as well as resends drop packets
+function lib:poll()
+
 end
 
 function lib:get_session() 

@@ -120,16 +120,17 @@ impl PacketShipper {
 
 // Clients have PacketRecievers
 
-struct RecievedPacket {
+// NOTE: Do we need this if not using sequenced packets?
+/*struct RecievedPacket {
     pub id: u64,
     pub packet: ClientPacket
-}
+}*/
 
 #[allow(dead_code)]
 pub struct PacketReciever {
     socket_address: std::net::SocketAddr,
     next_id: u64,
-    backed_up: Vec<RecievedPacket>,
+    // backed_up: Vec<RecievedPacket>, 
     last_message_time: std::time::Instant
 }
 
@@ -138,7 +139,7 @@ impl PacketReciever {
         PacketReciever {
             socket_address,
             next_id: 0,
-            backed_up: Vec::new(),
+            // backed_up: Vec::new(),
             last_message_time: std::time::Instant::now()
         }
     }

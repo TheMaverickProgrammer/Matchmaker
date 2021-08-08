@@ -161,13 +161,23 @@ impl Server {
 
                     if session_key.is_empty() {
                         if let Some(client_addr) = self.get_socket_addr_from_open_session() {
+                            // send to requester
                             self.clients
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
                             .send(socket, &ServerPacket::Join{ client_addr: &client_addr });
                             
+                            // send to session host
+                            self.clients
+                            .get_mut(&client_addr)
+                            .unwrap()
+                            .shipper
+                            .send(socket, &ServerPacket::Join{ client_addr: &socket_address });
+
+                            // Drop any sessions related to these two clients
                             self.drop_client_session(&client_addr);
+                            self.drop_client_session(&socket_address);
                         } else {
                             self.clients
                             .get_mut(&socket_address)
@@ -177,13 +187,23 @@ impl Server {
                         }
                     } else {
                         if let Some(client_addr) = self.get_socket_addr_from_session(&session_key) {
+                            // send to requester
                             self.clients
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
                             .send(socket, &ServerPacket::Join{ client_addr: &client_addr });
                             
+                            // send to session host
+                            self.clients
+                            .get_mut(&client_addr)
+                            .unwrap()
+                            .shipper
+                            .send(socket, &ServerPacket::Join{ client_addr: &socket_address });
+
+                            // Drop any sessions related to these two clients
                             self.drop_client_session(&client_addr);
+                            self.drop_client_session(&socket_address);
                         } else {
                             self.clients
                             .get_mut(&socket_address)
