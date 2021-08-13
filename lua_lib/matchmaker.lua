@@ -37,11 +37,9 @@ function send_packet(ctx, packetId, header, data)
     print("packetId: "..packetId)
     serializer:write_u64(packetId, false, littleEndian)
 
-    print("header: "..header)
+    -- print("header: "..header)
 
     serializer:write_u16(header, false, littleEndian)
-
-    print("Buffer after header: "..serializer.Buffer)
 
     -- { id: u64 }
     if header == PacketHeader.Ack then
@@ -50,10 +48,9 @@ function send_packet(ctx, packetId, header, data)
 
     -- { client_hash: str, password_protected: bool }
     if header == PacketHeader.Create then 
-        print("Client hash: "..data.client_hash)
+        -- print("Client hash: "..data.client_hash)
         serializer:write_string(data.client_hash, littleEndian)
 
-        print("Buffer after client hash: "..serializer.Buffer)
 
         local value = 0
 
@@ -61,10 +58,8 @@ function send_packet(ctx, packetId, header, data)
             value = 1
         end
 
-        print("Password protected: "..value)
+        -- print("Password protected: "..value)
         serializer:write_u8(data.password_protected)
-
-        print("Buffer after password protected: "..serializer.Buffer)
     end
 
     -- { client_hash: str, session_key: str }
@@ -85,7 +80,9 @@ function send_packet(ctx, packetId, header, data)
     end
     --]]
 
+    ctx.nextPacketId = packetId + 1
     ctx.socket:send(serializer.Buffer)
+    ctx.sent_packets[packetId] = serializer.Buffer
 end
 
 function read_packet(ctx, bytestream)
@@ -93,23 +90,26 @@ function read_packet(ctx, bytestream)
 
     print("bystream is "..bytestream)
 
-    local packetId = serializer:read_u16()
+    local packetId = serializer:read_u64()
 
-    print("packetId read was "..packetId)
+    local header = serializer:read_u16()
+
+    print("header read was "..header)
 
     -- {}
-    if packetId == PacketHeader.PingPong then 
+    if header == PacketHeader.PingPong then 
         print("PingPong packet recieved")
+        send_packet(ctx, ctx.nextPacketId, PacketHeader.PingPong, {})
     end
 
     -- { id: u64 }
-    if packetId == PacketHeader.Ack then
+    if header == PacketHeader.Ack then
         local id = serializer:read_u64()
         ctx.sent_packets[id] = nil
     end
 
     -- { id: u64, message: str }
-    if packetId == PacketHeader.Error then 
+    if header == PacketHeader.Error then 
         local id = serializer:read_u64()
         local message = serializer:read_string()
         ctx.sent_packets[id] = nil
@@ -117,20 +117,24 @@ function read_packet(ctx, bytestream)
     end
 
     -- { session_key: str }
-    if packetId == PacketHeader.Create then 
+    if header == PacketHeader.Create then 
         local session_key = serializer:read_string()
         ctx.session_key = session_key
     end
 
     -- { socket_address: str }
-    if packetId == PacketHeader.Join then 
+    if header == PacketHeader.Join then 
         local socket_address = serializer:read_string()
         ctx.remote_addr = socket_address
     end
 end
 
 function lib:check_config() 
-    return string.len(self.ip) > 0 and self.port >= 1025 and self.port <= 65535 and string.len(self.client_hash) > 0 
+    return string.len(self.ip) > 0 
+    and self.port >= 1025 
+    and self.port <= 65535 
+    and string.len(self.client_hash) > 0 
+    and serializer:lua_byte_size() == 64
 end
 
 function lib:init(client_hash, ip, port, timeout, debug) 
@@ -143,6 +147,10 @@ function lib:init(client_hash, ip, port, timeout, debug)
     end
 
     if self:check_config() == false then
+        if serializer:lua_byte_size() == 32 then 
+            print("Matchmaker lib does not support 32bit architecture!")
+        end
+        
         print("Bad config")
     else
         if self.socket then 
@@ -150,7 +158,10 @@ function lib:init(client_hash, ip, port, timeout, debug)
         end 
 
         self.socket = socket.udp()
+        self.socket:setoption('reuseaddr',true)
+        self.socket:setsockname('*', 3001)
         self.socket:setpeername(self.ip, self.port)
+
         self.nextPacketId = 0
 
         if debug == true then

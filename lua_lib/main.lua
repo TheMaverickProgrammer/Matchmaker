@@ -5,6 +5,10 @@ local dummy_hash = "YZ0123"
 local mm = require("matchmaker")
 
 mm:init(dummy_hash, 'localhost', 3000, 0, true)
+
+if mm:check_config() == false then return end
+
+mm:create_session(true)
 mm:create_session(true)
 
 while(mm:get_session():len() == 0) do
@@ -13,11 +17,17 @@ end
 
 print("Server returned session code: "..mm:get_session())
 
---mm:join_session("8G9RnIe")
---mm:join_session()
+-- mm:create_session(true) -- Works!
+
+while(true) do
+    mm:poll()
+end
+
+mm:join_session("8G9RnIe")
+mm:join_session()
 
 
 -- should also close the session on the server
-mm:close()
+-- mm:close() -- works!
 
 print('Done')

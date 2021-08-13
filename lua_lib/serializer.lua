@@ -16,6 +16,14 @@ function serializer:endian()
 	return "Big Endian"
 end
 
+function serializer:lua_byte_size() 
+	if(0xfffffffff==0xffffffff) then
+		return 32
+	end
+
+	return 64
+end
+
 function serializer:clear() 
 	self.Buffer = ""
 	self.Position = 0
@@ -103,7 +111,7 @@ function serializer:read_u64(reversed)
 end
 
 function serializer:read_string(reversed)
-    local len = self:read_u16(reversed)
+    local len = self:read_u8(reversed)
 	local ret = ""
 	if len == 0 then
 	 return ret
@@ -177,8 +185,6 @@ function serializer:write_u32(int32, insert, reverse)
 end
 
 function serializer:write_u64(int64, insert, reverse)
-	print("serializer:write_u64 value is "..int64)
-
 	local l1 = bit.rshift(int64, 56)
 	local l2 = bit.rshift(int64, 48) - bit.lshift(l1, 8)
 	local l3 = bit.rshift(int64, 40) - bit.lshift(l1, 16) - bit.lshift(l2, 8)
@@ -189,6 +195,15 @@ function serializer:write_u64(int64, insert, reverse)
 	local l8 = int64 - bit.lshift(l1, 56) - bit.lshift(l2, 48) - bit.lshift(l3, 40) - bit.lshift(l4, 32) - bit.lshift(l5, 24) - bit.lshift(l6, 16) - bit.lshift(l7, 8)
 
 	l1,l2,l3,l4,l5,l6,l7,l8 = self:check_bytes(l1,l2,l3,l4,l5,l6,l7,l8)
+
+	print("l1 "..l1)
+	print("l2 "..l2)
+	print("l3 "..l3)
+	print("l4 "..l4)
+	print("l5 "..l5)
+	print("l6 "..l6)
+	print("l7 "..l7)
+	print("l8 "..l8)
 	
 	if not(reverse) then
 		self:write_u8(l8, insert)
@@ -213,7 +228,7 @@ end
 
 function serializer:write_string(str, reverse)
     local len = str:len()
-	self:write_u16(len, false, reverse)
+	self:write_u8(len, false, reverse)
 	self.Buffer = self.Buffer..str
 end
 

@@ -122,10 +122,11 @@ impl Server {
                         let reciever = &mut client.reciever;
 
                         if let Some(data) = reciever.sort_packets(&socket, id, packet) {
+                            server.clients.insert(socket_address, client);
+
+                            println!("Some data packet ID is {} from {}", id, socket_address);
                             server.handle_packet(&socket, socket_address, id, data)
                         }
-
-                        server.clients.insert(socket_address, client);
                     }
                 }
             }
@@ -143,6 +144,7 @@ impl Server {
                 },
                 ClientPacket::Create { client_hash, password_protected } => {
                     if !self.valid_client_hash(&client_hash) {
+                        println!("client hash {} is not valid", client_hash);
                         return;
                     }
 
@@ -235,6 +237,19 @@ impl Server {
         self.clients.contains_key(socket_address)
     }
 
+    fn has_session(&self, socket_address: &SocketAddr) -> bool {
+        let result = self
+        .sessions
+        .iter()
+        .find_map(|(key, &val)| if val == *socket_address { Some(key) } else { None });
+
+        if let Some(_) = result {
+            return true;
+        }
+
+        false
+    }
+
     fn valid_client_hash(&self, hash: &str) -> bool {
         self.valid_client_hashes.iter().position(|h: &String| *h == *hash) != None
     }
@@ -263,18 +278,16 @@ impl Server {
     fn create_session(&mut self, socket_address: &SocketAddr, password_protected: bool) -> Option<String> {
         let mut result = None;
 
-        if !self.has_client(&socket_address) {
+        if !self.has_session(&socket_address) {
             loop {
                 let new_key = Server::generate_key();
 
                 if !self.has_key(&new_key) {
-                    let client = Client { 
-                        reciever: PacketReciever::new(socket_address.clone()),
-                        shipper: PacketShipper::new(socket_address.clone()),
-                        session: Some(Session { key: new_key.clone(), password_protected: password_protected })
-                    };
+                    let session = Session { key: new_key.clone(), password_protected: password_protected };
 
-                    self.clients.insert(socket_address.clone(), client);
+                    let client = &mut self.clients.get_mut(socket_address).unwrap();
+                    client.session = Some(session);
+                    
                     self.sessions.insert(new_key.clone(), socket_address.clone());
 
                     println!("Session created for client {}:{} with key {} (password_protected: {})", 

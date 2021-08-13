@@ -81,6 +81,8 @@ impl PacketShipper {
 
         let _ = socket.send_to(&data, self.socket_address);
 
+        println!("After socket send to {} ", self.socket_address);
+
         self.backed_up.push(Packet {
             id: self.next_id,
             creation_time: std::time::Instant::now(),
