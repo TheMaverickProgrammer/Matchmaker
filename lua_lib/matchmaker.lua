@@ -1,16 +1,26 @@
 -- matchmaker lua module
 local socket = require("socket")
+local serializer = require("serializer")
 
 local lib = {
     ip = "",          -- matchmaker server ip
     port = 0,         -- matchmaker server port
     timeout = 0,      -- connection timeout
     socket = nil,     -- udp socket
-    session_key = "", -- active session key
-    client_hash = ""  -- crypto hash of client to verify authenticity
+    session_key = "", -- active session key (host only)
+    remote_addr = "", -- remote connection
+    client_hash = "", -- crypto hash of client to verify authenticity
+    sent_packets = {},-- list of unack'd packaget that had been sent
+    errors = {},      -- list of errors
+    nextPacketId = 0, -- next packet ID
+    debug = false     -- Prints debug information to console
 }
 
-local PacketId {
+--[[
+Packet headers are u16 size
+Packet IDs are u64 size
+--]]
+local PacketHeader = {
     PingPong = 0,
     Ack = 1,
     Create = 2,
@@ -19,51 +29,103 @@ local PacketId {
     Error = 5    
 }
 
-function send_packet(ctx, packetId, data)
-    local bytestream = nil
+function send_packet(ctx, packetId, header, data)
+    serializer:clear()
 
-    -- {}
-    if packetId == PacketId.PingPong then 
-    
-    end
+    local littleEndian = serializer:endian() == "Little Endian"
+
+    print("packetId: "..packetId)
+    serializer:write_u64(packetId, false, littleEndian)
+
+    print("header: "..header)
+
+    serializer:write_u16(header, false, littleEndian)
+
+    print("Buffer after header: "..serializer.Buffer)
 
     -- { id: u64 }
-    if packetId == PacketId.Ack then
-
+    if header == PacketHeader.Ack then
+       serializer:write_u64(data.id, false, littleEndian)
     end
 
-    -- { client_hash: str, password_procted: bool }
-    if packetId == PacketId.Create then 
+    -- { client_hash: str, password_protected: bool }
+    if header == PacketHeader.Create then 
+        print("Client hash: "..data.client_hash)
+        serializer:write_string(data.client_hash, littleEndian)
 
+        print("Buffer after client hash: "..serializer.Buffer)
+
+        local value = 0
+
+        if data.password_protected then
+            value = 1
+        end
+
+        print("Password protected: "..value)
+        serializer:write_u8(data.password_protected)
+
+        print("Buffer after password protected: "..serializer.Buffer)
     end
 
     -- { client_hash: str, session_key: str }
-    if packetId == PacketId.Join then 
-
+    if header == PacketHeader.Join then 
+        serializer:write_string(data.client_hash, littleEndian)
+        serializer:write_string(data.session_key, littleEndian)
     end
 
     -- {}
-    if packetId == PacketId.Close then 
-    
+    --[[
+    if header == PacketHeader.PingPong then 
     end
+    --]]
+
+    -- {}
+    --[[
+    if header == PacketHeader.Close then
+    end
+    --]]
+
+    ctx.socket:send(serializer.Buffer)
 end
 
-function read_packet(Ctx, bytestream)
-    local packetId = 0 
+function read_packet(ctx, bytestream)
+    serializer:set_buffer(bytestream)
+
+    print("bystream is "..bytestream)
+
+    local packetId = serializer:read_u16()
+
+    print("packetId read was "..packetId)
 
     -- {}
-    if packetId == PacketId.PingPong then 
-
+    if packetId == PacketHeader.PingPong then 
+        print("PingPong packet recieved")
     end
 
     -- { id: u64 }
-    if packetId == PacketId.Ack then
-
+    if packetId == PacketHeader.Ack then
+        local id = serializer:read_u64()
+        ctx.sent_packets[id] = nil
     end
 
     -- { id: u64, message: str }
-    if packetId == PacketId.Error then 
+    if packetId == PacketHeader.Error then 
+        local id = serializer:read_u64()
+        local message = serializer:read_string()
+        ctx.sent_packets[id] = nil
+        ctx.errors.push(message)
+    end
 
+    -- { session_key: str }
+    if packetId == PacketHeader.Create then 
+        local session_key = serializer:read_string()
+        ctx.session_key = session_key
+    end
+
+    -- { socket_address: str }
+    if packetId == PacketHeader.Join then 
+        local socket_address = serializer:read_string()
+        ctx.remote_addr = socket_address
     end
 end
 
@@ -71,7 +133,7 @@ function lib:check_config()
     return string.len(self.ip) > 0 and self.port >= 1025 and self.port <= 65535 and string.len(self.client_hash) > 0 
 end
 
-function lib:init(client_hash, ip, port, timeout) 
+function lib:init(client_hash, ip, port, timeout, debug) 
     self.ip = ip
     self.port = port
     self.client_hash = client_hash
@@ -89,6 +151,14 @@ function lib:init(client_hash, ip, port, timeout)
 
         self.socket = socket.udp()
         self.socket:setpeername(self.ip, self.port)
+        self.nextPacketId = 0
+
+        if debug == true then
+            self.debug = true
+            print("Host machine Endianess is "..serializer:endian())
+        else 
+            self.debug = false
+        end
     end
 end
 
@@ -100,7 +170,7 @@ function lib:create_session(password_protected)
                 password_protected = password_protected
             }
 
-            send_packet(self, PacketId.Create, data)
+            send_packet(self, self.nextPacketId, PacketHeader.Create, data)
         else 
             print("You have a session already @ "..self.session_key)
         end
@@ -115,7 +185,7 @@ function lib:join_session(password)
                 session_key = password
             }
             
-            send_packet(self, PacketId.Join, data)
+            send_packet(self, self.nextPacketId, PacketHeader.Join, data)
         else 
             print("You are hosting a session, could not join a session!")
         end
@@ -129,7 +199,7 @@ function lib:close_session()
             return
         end
 
-        send_packet(self, PacketId.Close, {})
+        send_packet(self, self.nextPacketId, PacketHeader.Close, {})
     end
 end
 
@@ -146,11 +216,19 @@ end
 -- Processes and acks incoming packets 
 -- as well as resends drop packets
 function lib:poll()
+    local bytestream = self.socket:receive()
 
+    if bytestream then 
+        read_packet(self, bytestream)
+    end
 end
 
 function lib:get_session() 
     return self.session_key
+end
+
+function lib:get_remote_addr()
+    return self.remote_addr
 end
 
 return lib

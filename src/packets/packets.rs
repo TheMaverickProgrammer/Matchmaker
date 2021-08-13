@@ -264,24 +264,30 @@ fn parse_headers(buf: &mut &[u8]) -> Option<u64> {
 }
 
 fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
-    let packet_type = num::FromPrimitive::from_u16(read_u16(buf)?);
+    let packet_type = read_u16(buf)?;
+
+    println!("packet_type: {}", packet_type);
 
     match packet_type {
-        Some(PacketId::PingPong) => Some(ClientPacket::Ping),
-        Some(PacketId::Ack) => Some(ClientPacket::Ack {
+        0 => Some(ClientPacket::Ping),
+        1 => Some(ClientPacket::Ack {
             id: read_u64(buf)?
         }),
-        Some(PacketId::Create) => Some(ClientPacket::Create {
+        2 => Some(ClientPacket::Create {
             client_hash: read_string_u8(buf)?,
             password_protected: read_bool(buf)?
         }),
-        Some(PacketId::Join) => Some(ClientPacket::Join{
+        3 => Some(ClientPacket::Join{
             client_hash: read_string_u8(buf)?,
             session_key: read_string_u8(buf)?
         }),
-        Some(PacketId::Close) => Some(ClientPacket::Close),
+        4 => Some(ClientPacket::Close),
         _ => None
     }
+}
+
+pub fn parse_client_packet(mut buf: &[u8]) -> Option<(u64, ClientPacket)> {
+    Some((parse_headers(&mut buf)?, parse_packet(&mut buf)?))
 }
 
 // writers
@@ -358,8 +364,4 @@ pub fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
     }
 
     vec
-}
-
-pub fn parse_client_packet(mut buf: &[u8]) -> Option<(u64, ClientPacket)> {
-    Some((parse_headers(&mut buf)?, parse_packet(&mut buf)?))
 }
