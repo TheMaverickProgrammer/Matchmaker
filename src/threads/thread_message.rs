@@ -4,7 +4,7 @@ pub enum ThreadMessage {
     Tick(Box<dyn FnOnce() + Send>),
     ClientPacket {
         socket_address: std::net::SocketAddr,
-        id: u64,
+        id: u32,
         packet: ClientPacket
     }
 }

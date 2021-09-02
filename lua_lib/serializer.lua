@@ -1,10 +1,22 @@
+-- Note: already provided by BizHawk
+-- local bit = require("bit")
+
 ---Read Functions
-local bit = require("bit")
 
 local serializer = {
 	Buffer = "",
 	Position = 0
 }
+
+local function bor_ext(...)
+	local result = 0x00
+
+	for i, v in ipairs(arg) do 
+		result = bit.bor(v, result)
+	end
+
+	return result
+end
 
 function serializer:endian()
 	local function f() end
@@ -50,71 +62,47 @@ end
 
 function serializer:read_u8() 
     self.Position = self.Position + 1
-    return self.Buffer:byte(self.Position)
+    local b = self.Buffer:byte(self.Position)
+	print("b: "..b)
+	return b
 end
 
 function serializer:read_u16(reversed)
  
 	local l1,l2 = 0
-	if not(reversed) then
-     l1 = self:read_u8()
-     l2 = bit.lshift(self:read_u8(), 8)
-
+	if reversed then
+    	l1 = self:read_u8()
+		l2 = bit.lshift(self:read_u8(), 8)
 	else
-     l1 = bit.lshift(self:read_u8(), 8)
-     l2 = self:read_u8()	 
+    	l1 = bit.lshift(self:read_u8(), 8)
+    	l2 = self:read_u8()	 
 	end
 	
-    return bit.bor(l1, l2)
+    return bor_ext(l1, l2)
 end
  
 function serializer:read_u32(reversed)
 	local l1,l2,l3,l4 = 0
-	if not(reversed) then
-     l1 = self:read_u8()
-     l2 = bit.lshift(self:read_u8(), 8)
-     l3 = bit.lshift(self:read_u8(), 16)
-     l4 = bit.lshift(self:read_u8(), 24)
+	if reversed then
+		l1 = self:read_u8()
+		l2 = bit.lshift(self:read_u8(), 8)
+		l3 = bit.lshift(self:read_u8(), 16)
+		l4 = bit.lshift(self:read_u8(), 24)
 	else
-     l1 = bit.lshift(self:read_u8(), 24)
-     l2 = bit.lshift(self:read_u8(), 16)
-     l3 = bit.lshift(self:read_u8(), 8)
-     l4 = self:read_u8()	 
+		l1 = bit.lshift(self:read_u8(), 24)
+		l2 = bit.lshift(self:read_u8(), 16)
+		l3 = bit.lshift(self:read_u8(), 8)
+		l4 = self:read_u8()	 
 	end
 	
-    return bit.bor(l1, l2, l3, l4)
-end
-
-function serializer:read_u64(reversed)
-	local l1,l2,l3,l4,l5,l6,l7,l8 = 0
-	if not(reversed) then
-     l1 = self:read_u8()
-     l2 = bit.lshift(self:read_u8(), 8)
-     l3 = bit.lshift(self:read_u8(), 16)
-     l4 = bit.lshift(self:read_u8(), 24)
-	 l5 = bit.lshift(self:read_u8(), 32)
-	 l6 = bit.lshift(self:read_u8(), 40)
-	 l7 = bit.lshift(self:read_u8(), 48)
-	 l8 = bit.lshift(self:read_u8(), 56)
-	else
-     l1 = bit.lshift(self:read_u8(), 56)
-     l2 = bit.lshift(self:read_u8(), 48)
-     l3 = bit.lshift(self:read_u8(), 40)
-     l4 = bit.lshift(self:read_u8(), 32)
-	 l5 = bit.lshift(self:read_u8(), 24)
-	 l6 = bit.lshift(self:read_u8(), 16)
-	 l7 = bit.lshift(self:read_u8(), 8)
-	 l8 = self:read_u8()
-	end
-	
-    return bit.bor(l1, l2, l3, l4, l5, l6, l7, l8)
+    return bor_ext(l1, l2, l3, l4)
 end
 
 function serializer:read_string(reversed)
-    local len = self:read_u8(reversed)
+    local len = self:read_u8()
 	local ret = ""
 	if len == 0 then
-	 return ret
+		return ret
 	end
 	for i = 0, len - 1 do
 		local char = self:read_u8()
@@ -181,48 +169,6 @@ function serializer:write_u32(int32, insert, reverse)
 		self:write_u8(l2, insert)
 		self:write_u8(l3, insert)
 		self:write_u8(l4, insert)
-	end
-end
-
-function serializer:write_u64(int64, insert, reverse)
-	local l1 = bit.rshift(int64, 56)
-	local l2 = bit.rshift(int64, 48) - bit.lshift(l1, 8)
-	local l3 = bit.rshift(int64, 40) - bit.lshift(l1, 16) - bit.lshift(l2, 8)
-	local l4 = bit.rshift(int64, 32) - bit.lshift(l1, 24) - bit.lshift(l2, 16) - bit.lshift(l3, 8)
-	local l5 = bit.rshift(int64, 24) - bit.lshift(l1, 32) - bit.lshift(l2, 24) - bit.lshift(l3, 16) - bit.lshift(l4, 8)
-	local l6 = bit.rshift(int64, 16) - bit.lshift(l1, 40) - bit.lshift(l2, 32) - bit.lshift(l3, 24) - bit.lshift(l4, 16) - bit.lshift(l5, 8)
-	local l7 = bit.rshift(int64,  8) - bit.lshift(l1, 48) - bit.lshift(l2, 40) - bit.lshift(l3, 32) - bit.lshift(l4, 24) - bit.lshift(l5, 16) - bit.lshift(l6, 8)
-	local l8 = int64 - bit.lshift(l1, 56) - bit.lshift(l2, 48) - bit.lshift(l3, 40) - bit.lshift(l4, 32) - bit.lshift(l5, 24) - bit.lshift(l6, 16) - bit.lshift(l7, 8)
-
-	l1,l2,l3,l4,l5,l6,l7,l8 = self:check_bytes(l1,l2,l3,l4,l5,l6,l7,l8)
-
-	print("l1 "..l1)
-	print("l2 "..l2)
-	print("l3 "..l3)
-	print("l4 "..l4)
-	print("l5 "..l5)
-	print("l6 "..l6)
-	print("l7 "..l7)
-	print("l8 "..l8)
-	
-	if not(reverse) then
-		self:write_u8(l8, insert)
-		self:write_u8(l7, insert)
-		self:write_u8(l6, insert)
-		self:write_u8(l5, insert)
-		self:write_u8(l4, insert)
-		self:write_u8(l3, insert)
-		self:write_u8(l2, insert)
-		self:write_u8(l1, insert)
-	else
-		self:write_u8(l1, insert)
-		self:write_u8(l2, insert)
-		self:write_u8(l3, insert)
-		self:write_u8(l4, insert)
-		self:write_u8(l5, insert)
-		self:write_u8(l6, insert)
-		self:write_u8(l7, insert)
-		self:write_u8(l8, insert)
 	end
 end
 

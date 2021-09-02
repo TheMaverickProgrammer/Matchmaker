@@ -13,8 +13,8 @@ mod threads;
 use packets::{PacketShipper, PacketReciever, ClientPacket, ServerPacket, build_server_packet};
 use threads::{create_listening_thread, create_clock_thread, ThreadMessage};
 
-const MAX_SILENCE_DURATION: f32 = 60.0;
-const MAX_PING_PONG_RATE: f32 = 1.0;
+const MAX_SILENCE_DURATION: f32 = 30.0;
+const MAX_PING_PONG_RATE: f32 = 5.0;
 
 struct Session {
     key: String,
@@ -80,24 +80,27 @@ impl Server {
                     // kick silent clients
                     let mut kick_list = Vec::new();
 
-                    for(socket_address, client) in &server.clients {
+                    for(socket_address, client) in &mut server.clients {
                         let last_message_time = client.reciever.get_last_message_time();
 
                         if last_message_time.elapsed().as_secs_f32() > MAX_SILENCE_DURATION {
                             kick_list.push(*socket_address);
+                            continue;
+                        }
+
+                        // start ping-pong
+                        if last_ping_pong.elapsed().as_secs_f32() >= MAX_PING_PONG_RATE {
+                            client.shipper.send(&socket, &ServerPacket::Ping);
+                            last_ping_pong = time;
                         }
                     }
 
                     for socket_address in kick_list {
                         let buf = build_server_packet(&ServerPacket::Close);
                         let _ = socket.send_to(&buf, socket_address);
-                        server.drop_client_session(&socket_address);
-                    }
 
-                    // start ping-pong
-                    if last_ping_pong.elapsed().as_secs_f32() >= MAX_PING_PONG_RATE {
-                        // TODO: broadcast ping pong
-                        last_ping_pong = time;
+                        println!("Dropping host {} due to silence", socket_address.to_string());
+                        server.drop_client_session(&socket_address);
                     }
                 }
                 ThreadMessage::ClientPacket {
@@ -133,12 +136,10 @@ impl Server {
         }
     }
 
-    fn handle_packet(&mut self, socket: &UdpSocket, socket_address: SocketAddr, id: u64, packet: ClientPacket) {
+    fn handle_packet(&mut self, socket: &UdpSocket, socket_address: SocketAddr, id: u32, packet: ClientPacket) {
         if self.has_client(&socket_address) {
             match packet {
-                ClientPacket::Ping => {
-                    self.clients.get_mut(&socket_address).unwrap().shipper.send(socket, &ServerPacket::Pong);
-                },
+                ClientPacket::Pong => {},
                 ClientPacket::Ack { id } => {
                     self.clients.get_mut(&socket_address).unwrap().shipper.acknowledge(id);
                 },
@@ -214,9 +215,6 @@ impl Server {
                             .send(socket, &ServerPacket::Error{ id, message: &"No session found with key" });
                         }
                     }
-
-
-
                 },
                 ClientPacket::Close => {
                     self.drop_client_session(&socket_address);

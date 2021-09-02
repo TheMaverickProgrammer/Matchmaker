@@ -8,15 +8,20 @@ enum PacketId {
     PingPong = 0,
     Ack = 1,
     Create = 2,
-    Join = 3 ,
+    Join = 3,
     Close = 4,
     Error = 5
 }
 
+enum PacketType {
+    AckPacket = 0,
+    DataPacket = 1
+}
+
 pub enum ServerPacket<'a> {
-    Pong,
+    Ping,
     Ack {
-        id: u64
+        id: u32
     },
     Create {
         session_key: &'a str
@@ -26,16 +31,16 @@ pub enum ServerPacket<'a> {
     },
     Close,
     Error {
-        id: u64,
+        id: u32,
         message: &'a str
     }
 }
 
 #[derive(Debug)]
 pub enum ClientPacket {
-    Ping,
+    Pong,
     Ack {
-        id: u64
+        id: u32
     },
     Create {
         client_hash: String,
@@ -51,7 +56,7 @@ pub enum ClientPacket {
 // packets
 
 pub struct Packet {
-    pub id: u64,
+    pub id: u32,
     pub creation_time: std::time::Instant,
     pub data: Vec<u8>
 }
@@ -60,7 +65,7 @@ pub struct Packet {
 
 pub struct PacketShipper {
     socket_address: SocketAddr,
-    next_id: u64,
+    next_id: u32,
     backed_up: Vec<Packet>
 }
 
@@ -76,8 +81,12 @@ impl PacketShipper {
     pub fn send(&mut self, socket: &UdpSocket, packet: &ServerPacket) {
         let mut data = vec![];
 
-        write_u64(&mut data, self.next_id);
+        data.push(PacketType::DataPacket as u8);
+
+        write_u32(&mut data, self.next_id);
         data.extend(build_server_packet(packet));
+
+        println!("Buffer: {:?}", data);
 
         let _ = socket.send_to(&data, self.socket_address);
 
@@ -111,7 +120,7 @@ impl PacketShipper {
         }
     }
 
-    pub fn acknowledge(&mut self, id: u64) {
+    pub fn acknowledge(&mut self, id: u32) {
         self
         .backed_up
         .iter()
@@ -124,14 +133,14 @@ impl PacketShipper {
 
 // NOTE: Do we need this if not using sequenced packets?
 /*struct RecievedPacket {
-    pub id: u64,
+    pub id: u32,
     pub packet: ClientPacket
 }*/
 
 #[allow(dead_code)]
 pub struct PacketReciever {
     socket_address: std::net::SocketAddr,
-    next_id: u64,
+    next_id: u32,
     // backed_up: Vec<RecievedPacket>, 
     last_message_time: std::time::Instant
 }
@@ -152,7 +161,7 @@ impl PacketReciever {
 
     pub fn sort_packets(&mut self,
         socket: &UdpSocket,
-        id: u64,
+        id: u32,
         packet: ClientPacket
     ) -> Option<ClientPacket> {
         self.last_message_time = std::time::Instant::now();
@@ -168,12 +177,21 @@ impl PacketReciever {
         }
     }
 
-    fn send_ack(&self, socket: &UdpSocket, id: u64) {
-        let buf = build_server_packet(&ServerPacket::Ack {
-            id
-        });
+    fn send_ack(&self, socket: &UdpSocket, id: u32) {
+        let mut data = vec![];
 
-        let _ = socket.send_to(&buf, self.socket_address);
+        data.push(PacketType::AckPacket as u8); // ack packet type
+
+        data.extend(
+            build_server_packet(
+                &ServerPacket::Ack {
+                    id
+                }
+            )
+        );
+
+        println!("Buffer: {:?}", data);
+        let _ = socket.send_to(&data, self.socket_address);
     }
 }
 
@@ -210,7 +228,6 @@ pub fn read_u16(buf: &mut &[u8]) -> Option<u16> {
     Some(data)
 }
 
-#[allow(dead_code)]
 pub fn read_u32(buf: &mut &[u8]) -> Option<u32> {
     use byteorder::{ByteOrder, LittleEndian};
 
@@ -222,21 +239,6 @@ pub fn read_u32(buf: &mut &[u8]) -> Option<u32> {
     let data = LittleEndian::read_u32(buf);
 
     *buf = &buf[4..];
-
-    Some(data)
-}
-
-pub fn read_u64(buf: &mut &[u8]) -> Option<u64> {
-    use byteorder::{ByteOrder, LittleEndian};
-
-    if buf.len() < 8 {
-        *buf = &buf[buf.len()..];
-        return None;
-    }
-
-    let data = LittleEndian::read_u64(buf);
-
-    *buf = &buf[8..];
 
     Some(data)
 }
@@ -261,8 +263,8 @@ fn read_string(buf: &mut &[u8], len: usize) -> Option<String> {
     Some(string)
 }
 
-fn parse_headers(buf: &mut &[u8]) -> Option<u64> {
-    Some(read_u64(buf)?)
+fn parse_headers(buf: &mut &[u8]) -> Option<u32> {
+    Some(read_u32(buf)?)
 }
 
 fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
@@ -271,9 +273,9 @@ fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
     println!("packet_type: {}", packet_type);
 
     match packet_type {
-        0 => Some(ClientPacket::Ping),
+        0 => Some(ClientPacket::Pong),
         1 => Some(ClientPacket::Ack {
-            id: read_u64(buf)?
+            id: read_u32(buf)?
         }),
         2 => Some(ClientPacket::Create {
             client_hash: read_string_u8(buf)?,
@@ -288,7 +290,7 @@ fn parse_packet(buf: &mut &[u8]) -> Option<ClientPacket> {
     }
 }
 
-pub fn parse_client_packet(mut buf: &[u8]) -> Option<(u64, ClientPacket)> {
+pub fn parse_client_packet(mut buf: &[u8]) -> Option<(u32, ClientPacket)> {
     Some((parse_headers(&mut buf)?, parse_packet(&mut buf)?))
 }
 
@@ -307,21 +309,12 @@ pub fn write_u16(buf: &mut Vec<u8>, data: u16) {
     buf.extend(&buf_16);
 }
 
-#[allow(dead_code)]
 pub fn write_u32(buf: &mut Vec<u8>, data: u32) {
     use byteorder::{ByteOrder, LittleEndian};
 
     let mut buf_32 = [0u8; 4];
     LittleEndian::write_u32(&mut buf_32, data);
     buf.extend(&buf_32);
-}
-
-pub fn write_u64(buf: &mut Vec<u8>, data: u64) {
-    use byteorder::{ByteOrder, LittleEndian};
-
-    let mut buf_64 = [0u8; 8];
-    LittleEndian::write_u64(&mut buf_64, data);
-    buf.extend(&buf_64);
 }
 
 pub fn write_string_u8(buf: &mut Vec<u8>, data: &str) {
@@ -340,12 +333,12 @@ pub fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
     let buf = &mut vec;
 
     match packet {
-        ServerPacket::Pong => {
+        ServerPacket::Ping => {
             write_u16(buf, PacketId::PingPong as u16);
         },
         ServerPacket::Ack { id } => {
             write_u16(buf, PacketId::Ack as u16);
-            write_u64(buf, *id);
+            write_u32(buf, *id);
         },
         ServerPacket::Create { session_key } => {
             write_u16(buf, PacketId::Create as u16);
@@ -360,7 +353,7 @@ pub fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
         },
         ServerPacket::Error { id, message } => {
             write_u16(buf, PacketId::Error as u16);
-            write_u64(buf, *id);
+            write_u32(buf, *id);
             write_string_u8(buf, *message);
         }
     }

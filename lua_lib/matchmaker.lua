@@ -13,6 +13,7 @@ local lib = {
     sent_packets = {},-- list of unack'd packaget that had been sent
     errors = {},      -- list of errors
     nextPacketId = 0, -- next packet ID
+    max_packet_len = 512,
     debug = false     -- Prints debug information to console
 }
 
@@ -29,55 +30,65 @@ local PacketHeader = {
     Error = 5    
 }
 
+--[[
+Packet types are read differently
+--]]
+local PacketType = {
+    AckPacket = 0,
+    DataPacket = 1
+}
+
 function send_packet(ctx, packetId, header, data)
+    print("in send_packet() with header "..header)
+
     serializer:clear()
 
     local littleEndian = serializer:endian() == "Little Endian"
 
-    print("packetId: "..packetId)
-    serializer:write_u64(packetId, false, littleEndian)
+    -- print("packetId: "..packetId)
+    serializer:write_u32(packetId, false, littleEndian)
 
     -- print("header: "..header)
 
     serializer:write_u16(header, false, littleEndian)
 
-    -- { id: u64 }
+    -- { id: u32 }
     if header == PacketHeader.Ack then
-       serializer:write_u64(data.id, false, littleEndian)
+        print("Sending Ack Packet")
+        serializer:write_u32(data.id, false, littleEndian)
     end
 
     -- { client_hash: str, password_protected: bool }
     if header == PacketHeader.Create then 
+        print("Sending Create Packet")
+
         -- print("Client hash: "..data.client_hash)
         serializer:write_string(data.client_hash, littleEndian)
-
-
+        
         local value = 0
-
         if data.password_protected then
             value = 1
         end
 
         -- print("Password protected: "..value)
-        serializer:write_u8(data.password_protected)
+        serializer:write_u8(value)
     end
 
     -- { client_hash: str, session_key: str }
     if header == PacketHeader.Join then 
+        print("Sending Join Packet")
+
         serializer:write_string(data.client_hash, littleEndian)
-        serializer:write_string(data.session_key, littleEndian)
+
+        if data.session_key ~= nil then
+            serializer:write_string(data.session_key, littleEndian)
+        else 
+            serializer:write_string("", littleEndian)
+        end
     end
 
-    -- {}
     --[[
-    if header == PacketHeader.PingPong then 
-    end
-    --]]
-
-    -- {}
-    --[[
-    if header == PacketHeader.Close then
-    end
+    Packets PingPong and Close only consist of the header 
     --]]
 
     ctx.nextPacketId = packetId + 1
@@ -86,15 +97,38 @@ function send_packet(ctx, packetId, header, data)
 end
 
 function read_packet(ctx, bytestream)
+    local littleEndian = serializer:endian() == "Little Endian"
+
+    print("in read_packet()")
     serializer:set_buffer(bytestream)
 
-    print("bystream is "..bytestream)
+    print("bystream has "..#bytestream)
 
-    local packetId = serializer:read_u64()
+    if #bytestream < 7 then
+        print("Bytestream too small to interpret. Dropping")
+        return
+    end
 
-    local header = serializer:read_u16()
+    local packetType = serializer:read_u8()
+    local packetId = nil
 
+    if packetType == PacketType.DataPacket then
+        packetId = serializer:read_u32(littleEndian)
+    end
+
+    local header = serializer:read_u16(littleEndian)
     print("header read was "..header)
+
+    if packetType == PacketType.AckPacket then
+        -- { id: u32 }
+        if header == PacketHeader.Ack then
+            print("Ack packet recieved")
+            local id = serializer:read_u32(littleEndian)
+            ctx.sent_packets[id] = nil
+        end
+
+        return
+    end
 
     -- {}
     if header == PacketHeader.PingPong then 
@@ -102,28 +136,26 @@ function read_packet(ctx, bytestream)
         send_packet(ctx, ctx.nextPacketId, PacketHeader.PingPong, {})
     end
 
-    -- { id: u64 }
-    if header == PacketHeader.Ack then
-        local id = serializer:read_u64()
-        ctx.sent_packets[id] = nil
-    end
 
-    -- { id: u64, message: str }
+    -- { id: u32, message: str }
     if header == PacketHeader.Error then 
-        local id = serializer:read_u64()
+        local id = serializer:read_u32(littleEndian)
         local message = serializer:read_string()
+        print("Error packet recieved: "..message)
         ctx.sent_packets[id] = nil
-        ctx.errors.push(message)
+        ctx.errors[#ctx.errors+1] = message
     end
 
     -- { session_key: str }
     if header == PacketHeader.Create then 
+        print("Create response packet recieved")
         local session_key = serializer:read_string()
         ctx.session_key = session_key
     end
 
     -- { socket_address: str }
     if header == PacketHeader.Join then 
+        print("Join response package recieved")
         local socket_address = serializer:read_string()
         ctx.remote_addr = socket_address
     end
@@ -134,7 +166,6 @@ function lib:check_config()
     and self.port >= 1025 
     and self.port <= 65535 
     and string.len(self.client_hash) > 0 
-    and serializer:lua_byte_size() == 64
 end
 
 function lib:init(client_hash, ip, port, timeout, debug) 
@@ -147,10 +178,6 @@ function lib:init(client_hash, ip, port, timeout, debug)
     end
 
     if self:check_config() == false then
-        if serializer:lua_byte_size() == 32 then 
-            print("Matchmaker lib does not support 32bit architecture!")
-        end
-        
         print("Bad config")
     else
         if self.socket then 
@@ -159,8 +186,9 @@ function lib:init(client_hash, ip, port, timeout, debug)
 
         self.socket = socket.udp()
         self.socket:setoption('reuseaddr',true)
-        self.socket:setsockname('*', 3001)
+        self.socket:setsockname('*', 0)
         self.socket:setpeername(self.ip, self.port)
+        self.socket:settimeout(self.timeout)
 
         self.nextPacketId = 0
 
@@ -227,10 +255,12 @@ end
 -- Processes and acks incoming packets 
 -- as well as resends drop packets
 function lib:poll()
-    local bytestream = self.socket:receive()
+    local chunk, err = self.socket:receive(lib.max_packet_len)
 
-    if bytestream then 
-        read_packet(self, bytestream)
+    if err then 
+        print("Error polling: "..err)
+    else
+        read_packet(self, chunk)
     end
 end
 
@@ -240,6 +270,10 @@ end
 
 function lib:get_remote_addr()
     return self.remote_addr
+end
+
+function lib:sleep(seconds)
+    socket.sleep(seconds)
 end
 
 return lib
