@@ -6,12 +6,15 @@ local wait_count = 10 -- in seconds
 local dummy_hash = "YZ0123"
 local mm = require("matchmaker")
 
-mm:init(dummy_hash, '127.0.0.1', 3000, 1, true)
+mm:init(dummy_hash, '127.0.0.1', 3000, 1)
 
 if mm:check_config() == false then return end
 
-mm:create_session(true)
+-- create_session() creates a new session on the server
+-- create_session(true) creates a private session
+mm:create_session()
 
+-- wait until we get our unique session key (secret)
 while(mm:get_session():len() == 0) do
     mm:poll()
 end
@@ -25,9 +28,19 @@ while(wait_count > 0) do
     mm:sleep(1.0)
 end
 
--- mm.socket -- use this when connection is available
--- should also close the session on the server
+local remote_addr = mm:get_remote_addr()
 
-mm:close() -- works!
+if remote_addr ~= '' then
+    print("joined session with remote "..remote_addr)
+    
+    -- use the socket when connection is available!
+    -- mm.socket 
+else 
+    print("No one joined the session")
+end
+
+-- cleanup
+-- will also close session on server for us
+mm:close()
 
 print('Done')

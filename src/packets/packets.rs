@@ -101,7 +101,6 @@ impl PacketShipper {
         self.next_id += 1;
     }
 
-    #[allow(dead_code)]
     pub fn resend_unacknowledged_packets(&self, socket: &UdpSocket) {
         let retry_delay = std::time::Duration::from_secs_f64(1.0 / TICK_RATE);
 

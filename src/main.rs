@@ -93,6 +93,8 @@ impl Server {
                             client.shipper.send(&socket, &ServerPacket::Ping);
                             last_ping_pong = time;
                         }
+
+                       client.shipper.resend_unacknowledged_packets(&socket);
                     }
 
                     for socket_address in kick_list {
@@ -100,7 +102,7 @@ impl Server {
                         let _ = socket.send_to(&buf, socket_address);
 
                         println!("Dropping host {} due to silence", socket_address.to_string());
-                        server.drop_client_session(&socket_address);
+                        server.drop_client(&socket_address);
                     }
                 }
                 ThreadMessage::ClientPacket {
@@ -309,7 +311,21 @@ impl Server {
         result
     }
 
+    // Drop the client session only (when a match is made)
     fn drop_client_session(&mut self, socket_address: &SocketAddr) -> bool {
+        if let Some(client) = self.clients.get(socket_address) {
+            if let Some(session) = &client.session {
+                self.sessions.remove(&session.key);
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    // Drop the client entirely including associated resources
+    fn drop_client(&mut self, socket_address: &SocketAddr) -> bool {
         if let Some(client) = self.clients.remove(socket_address) {
             if let Some(session) = client.session {
                 self.sessions.remove(&session.key);

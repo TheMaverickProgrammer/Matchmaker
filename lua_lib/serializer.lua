@@ -63,7 +63,7 @@ end
 function serializer:read_u8() 
     self.Position = self.Position + 1
     local b = self.Buffer:byte(self.Position)
-	print("b: "..b)
+	-- print("b: "..b)
 	return b
 end
 
