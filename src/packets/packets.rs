@@ -27,7 +27,8 @@ pub enum ServerPacket<'a> {
         session_key: &'a str
     },
     Join {
-        client_addr: &'a SocketAddr
+        client_addr: Option<&'a SocketAddr>,
+        success: bool
     },
     Close,
     Error {
@@ -343,9 +344,13 @@ pub fn build_server_packet(packet: &ServerPacket) -> Vec<u8> {
             write_u16(buf, PacketId::Create as u16);
             write_string_u8(buf, *session_key);
         },
-        ServerPacket::Join { client_addr } => {
+        ServerPacket::Join { client_addr, success } => {
             write_u16(buf, PacketId::Join as u16);
-            write_string_u8(buf, &client_addr.to_string());
+            write_bool(buf, *success);
+
+            if *success {
+                write_string_u8(buf, &client_addr.unwrap().to_string());
+            }
         },
         ServerPacket::Close => {
             write_u16(buf, PacketId::Close as u16);

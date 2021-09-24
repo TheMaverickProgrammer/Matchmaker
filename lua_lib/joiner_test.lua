@@ -16,11 +16,13 @@ if mm:check_config() == false then return end
 -- will join any public session
 mm:join_session()
 
-while(wait_count > 0) do
+while(wait_count > 0 and not mm:did_join_fail()) do
     wait_count = wait_count - 1
     mm:poll()
     mm:sleep(1.0)
 end
+
+print("Join request status="..mm:get_join_status())
 
 local remote_addr = mm:get_remote_addr()
 

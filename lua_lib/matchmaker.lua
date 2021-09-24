@@ -15,7 +15,9 @@ local lib = {
     next_packet_id = 0,        -- our next packet ID
     server_next_packet_id = 0, -- track the next packet from the server
     max_packet_len = 512,      -- max packet len a socket can read
-    debug = false              -- Prints debug information to console
+    debug = false,             -- Prints debug information to console
+    is_joining = false,       -- indicates whether we were trying to join
+    join_status = ""           -- indicates if the last join failed
 }
 
 --[[
@@ -96,8 +98,8 @@ end
 local function read_packet(ctx, bytestream)
     local littleEndian = serializer:endian() == "Little Endian"
 
-    -- self:_debug_print("in read_packet()")
-    -- self:_debug_print("bystream has "..#bytestream)
+    self:_debug_print("in read_packet()")
+    self:_debug_print("bystream has "..#bytestream)
 
     serializer:set_buffer(bytestream)
 
@@ -159,15 +161,32 @@ local function read_packet(ctx, bytestream)
         ctx.session_key = session_key
     end
 
-    -- { socket_address: str }
-    if header == PacketHeader.Join then 
+    -- { success: bool, socket_address: str }
+    if header == PacketHeader.Join and ctx.is_joining then 
         ctx:_debug_print("Join response package recieved")
-        local socket_address = serializer:read_string()
-        ctx.remote_addr = socket_address
+        local success = serializer:read_u8()
+
+        if success == 1 then 
+            local socket_address = serializer:read_string()
+            ctx.remote_addr = socket_address
+            ctx.join_status = "success"
+        else 
+            ctx.join_status = "failed"
+        end
+
+        ctx.is_joining = false
     end
 
     -- send the ack packet to the server
     send_packet(ctx, ctx.next_packet_id, PacketHeader.Ack, { id = packet_id })
+end
+
+function lib:did_join_fail() 
+    return self.join_status == "failed"
+end
+
+function lib:get_join_status() 
+    return self.join_status
 end
 
 function lib:check_config() 
@@ -181,6 +200,14 @@ function lib:init(client_hash, ip, port, timeout, debug)
     self.ip = ip
     self.port = port
     self.client_hash = client_hash
+    self.session_key = ""
+    self.remote_addr = ""
+    self.sent_packets = {}
+    self.errors = {}
+    self.next_packet_id = 0
+    self.server_next_packet_id = 0
+    self.is_joining = false 
+    self.join_status = "" 
 
     if timeout ~= nil then
         self.timeout = timeout
@@ -209,6 +236,11 @@ end
 
 function lib:create_session(password_protected)
     if self:check_config() then
+        if self.is_joining then 
+            self:_debug_print("You are in the middle of joining, request supressed")
+            return
+        end
+
         if string.len(self.session_key) == 0 then
             local data = {
                 client_hash = self.client_hash,
@@ -224,14 +256,22 @@ end
 
 function lib:join_session(password)
     if self:check_config() then
+        if self.is_joining then 
+            self:_debug_print("You are in the middle of joining, request supressed")
+            return
+        end
+
         if string.len(self.session_key) == 0 then
             local data = {
                 client_hash = self.client_hash,
                 session_key = password
             }
             send_packet(self, self.next_packet_id, PacketHeader.Join, data)
+            self.is_joining = true
+            self.join_status = "pending"
         else 
             self:_debug_print("You are hosting a session, could not join a session!")
+            self.join_status = "failed"
         end
     end
 end
@@ -244,6 +284,7 @@ function lib:close_session()
         end
 
         send_packet(self, self.next_packet_id, PacketHeader.Close, {})
+        self.session_key = ""
     end
 end
 

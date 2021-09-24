@@ -165,20 +165,20 @@ impl Server {
                     }
 
                     if session_key.is_empty() {
-                        if let Some(client_addr) = self.get_socket_addr_from_open_session() {
+                        if let Some(client_addr) = self.get_socket_addr_from_open_session(&socket_address) {
                             // send to requester
                             self.clients
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Join{ client_addr: &client_addr });
+                            .send(socket, &ServerPacket::Join{ client_addr: Some(&client_addr), success: true });
                             
                             // send to session host
                             self.clients
                             .get_mut(&client_addr)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Join{ client_addr: &socket_address });
+                            .send(socket, &ServerPacket::Join{ client_addr: Some(&socket_address), success: true });
 
                             // Drop any sessions related to these two clients
                             self.drop_client_session(&client_addr);
@@ -188,23 +188,23 @@ impl Server {
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Error{ id, message: &"No open session found" });
+                            .send(socket, &ServerPacket::Join{ client_addr: None, success: false });
                         }
                     } else {
-                        if let Some(client_addr) = self.get_socket_addr_from_session(&session_key) {
+                        if let Some(client_addr) = self.get_socket_addr_from_session(&session_key, &socket_address) {
                             // send to requester
                             self.clients
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Join{ client_addr: &client_addr });
+                            .send(socket, &ServerPacket::Join{ client_addr: Some(&client_addr), success: true });
                             
                             // send to session host
                             self.clients
                             .get_mut(&client_addr)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Join{ client_addr: &socket_address });
+                            .send(socket, &ServerPacket::Join{ client_addr: Some(&socket_address), success: true });
 
                             // Drop any sessions related to these two clients
                             self.drop_client_session(&client_addr);
@@ -214,7 +214,7 @@ impl Server {
                             .get_mut(&socket_address)
                             .unwrap()
                             .shipper
-                            .send(socket, &ServerPacket::Error{ id, message: &"No session found with key" });
+                            .send(socket, &ServerPacket::Join{ client_addr: None, success: false });
                         }
                     }
                 },
@@ -254,15 +254,22 @@ impl Server {
         self.valid_client_hashes.iter().position(|h: &String| *h == *hash) != None
     }
 
-    fn get_socket_addr_from_session(&self, key: &str) -> Option<SocketAddr> {
-        self.sessions.get(key).cloned()
+    fn get_socket_addr_from_session(&self, key: &str, exclude_socket: &SocketAddr) -> Option<SocketAddr> {
+        if let Some(socket) = self.sessions.get(key) {
+            if exclude_socket != socket {
+                return Some(socket.clone())
+            }
+        }
+
+        None
     }
 
-    fn get_socket_addr_from_open_session(&self) -> Option<SocketAddr> {
+    fn get_socket_addr_from_open_session(&self, exclude_socket: &SocketAddr) -> Option<SocketAddr> {
         self.sessions
             .values()
-            .find(|value| {
-                self.clients.get(&value).unwrap().session.as_ref().unwrap().password_protected == false
+            .find(|client_socket| {
+                self.clients.get(&client_socket).unwrap().session.as_ref().unwrap().password_protected == false 
+                && *client_socket != exclude_socket
             })
             .cloned()
     }
